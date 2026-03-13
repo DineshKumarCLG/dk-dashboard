@@ -1,0 +1,58 @@
+name: Sync Notion Data
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # every 30 min
+  workflow_dispatch:         # manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Fetch Notion data
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          HABITS_DB: "167402f18f4d413d9eda9e4e518bd19b"
+          GOALS_DB: "f06d2e37b2a7404f99e0e96b3331dfb7"
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          WEEK_AGO=$(date -u -d '6 days ago' +%Y-%m-%d)
+
+          # Fetch today's habits
+          HABITS=$(curl -s -X POST \
+            "https://api.notion.com/v1/databases/${HABITS_DB}/query" \
+            -H "Authorization: Bearer ${NOTION_API_KEY}" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d "{\"filter\":{\"property\":\"Date\",\"date\":{\"equals\":\"${TODAY}\"}},\"page_size\":1}")
+
+          # Fetch last 7 days habits
+          HABITS_WEEK=$(curl -s -X POST \
+            "https://api.notion.com/v1/databases/${HABITS_DB}/query" \
+            -H "Authorization: Bearer ${NOTION_API_KEY}" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d "{\"filter\":{\"property\":\"Date\",\"date\":{\"on_or_after\":\"${WEEK_AGO}\"}},\"sorts\":[{\"property\":\"Date\",\"direction\":\"ascending\"}],\"page_size\":7}")
+
+          # Fetch goals
+          GOALS=$(curl -s -X POST \
+            "https://api.notion.com/v1/databases/${GOALS_DB}/query" \
+            -H "Authorization: Bearer ${NOTION_API_KEY}" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d "{\"page_size\":20}")
+
+          # Write combined data.json
+          echo "{\"habits\":${HABITS},\"habits_week\":${HABITS_WEEK},\"goals\":${GOALS},\"synced_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > data.json
+
+      - name: Commit & push data.json
+        run: |
+          git config user.name "Clawdius"
+          git config user.email "clawdius@bot.local"
+          git add data.json
+          git diff --staged --quiet || git commit -m "sync: notion data $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
